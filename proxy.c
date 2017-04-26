@@ -17,6 +17,11 @@
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
+struct reqData {
+  ssize_t len;
+  int ishtml;
+};
+
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 
@@ -61,17 +66,21 @@ void send_data(rio_t rios, int fd, int clientfd, char *newRequest, ssize_t len)
 {
 
   char* content[MAXLINE];
-  ssize_t contentlen;
-
-
-  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
 
   while (rio_readlineb(&rios, content, MAXLINE) != NULL && len > 0) {
-    ssize_t tmp = rio_writen(fd, content, tmp); //send it to client
-    // rio_readlineb(&rios, content, MAXLINE); //red more from server
+    ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
     len -= tmp;
   }
 
+}
+
+void send_html(rio_t rios, int fd, int clientfd, char *newRequest)
+{
+  char *content[MAXLINE];
+  while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
+    printf("%s",content);
+    rio_writen(fd, content, strlen(content)); //send it to client
+  }
 }
 
 int startsWith(const char *pre, const char *str)
@@ -92,25 +101,28 @@ void drop(char *str, size_t n)
 /*
  * send_header sends the header info to the client and returns the package size
  */
-ssize_t send_header(rio_t rios, int fd, int clientfd, char *newRequest)
+struct reqData *send_header(rio_t rios, int fd, int clientfd, char *newRequest)
 {
+  struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
   char *content = (char *)malloc(MAXLINE);
-  ssize_t contentlen;
   ssize_t len = 0;
 
-  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
+  data->ishtml = 0;
+
   while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
     rio_writen(fd, content, strlen(content)); //send it to client
-    printf("%s",content);
+    if(startsWith("Content-Type: text/html",content)){
+      data->ishtml = 1;
+    }
     if(startsWith("Content-Length:",content)){
       drop(content,15);
-      len = atoi(content);
+      data->len = atoi(content);
     }
     if(strcmp(content,"\r\n")==0)
       break;
   }
   free(content);
-  return len;
+  return data;
 }
 
 void fetch(int fd){
@@ -154,7 +166,7 @@ void fetch(int fd){
     sprintf(newRequest, "%sProxy-Connection: close\r\n\r\n", newRequest);
     //sprintf(newRequest, "%s\r\n\r\n",newRequest);
 
-    printf("%s", newRequest);
+    //printf("%s", newRequest);
     //printf("%d\n", port);
 
 
@@ -165,9 +177,14 @@ void fetch(int fd){
     //printf("%d\n", clientfd);
 
     rio_t rios;
+    rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
     rio_readinitb(&rios, clientfd);
-    ssize_t len = send_header(rios,fd,clientfd,newRequest);
-    send_data(rios,fd,clientfd,newRequest,len);
+    struct reqData *data = send_header(rios,fd,clientfd,newRequest);
+    if(data->ishtml)
+      send_html(rios,fd,clientfd,newRequest);
+    else
+      send_data(rios,fd,clientfd,newRequest,data->len);
+    free(data);
     Close(clientfd);
 }
 
