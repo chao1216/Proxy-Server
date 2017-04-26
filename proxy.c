@@ -23,7 +23,7 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
 /*
  * Function prototypes
  */
-int parse_uri(char *uri, char *target_addr, char *path, int  *port);
+int parse_uri(char *uri, char *target_addr, char *path, char  *port);
 void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, int size);
 void fetch(int fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
@@ -57,7 +57,8 @@ void fetch(int fd){
     struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
-    int port;
+    //int port;
+    char* port = (char*)malloc(sizeof(char)*20);
     rio_t rioc; //for client
     rio_t rios; //for server
 
@@ -77,7 +78,7 @@ void fetch(int fd){
     }
     //read_requesthdrs(&rio);
 
-    int stat = parse_uri(uri,hostname,pathname,&port); //get hostname and pathname from uri
+    int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
     if(stat!=0){ //returns -1 if problem
         clienterror(fd, uri, "505", "??????",".....");
         return;
@@ -100,9 +101,10 @@ void fetch(int fd){
     char* content[MAXLINE];
     ssize_t contentlen;
 
+   // printf("%s\n", port);
+
     //now need to make connection with web server
-    //clientfd = open_clientfd(hostname, (char*)&port); //not reading port correctly
-    clientfd = open_clientfd(hostname, "80");
+    clientfd = open_clientfd(hostname, port);
 
     //printf("%d\n", clientfd);
 
@@ -113,9 +115,9 @@ void fetch(int fd){
     rio_readinitb(&rios, clientfd);
     while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
         rio_writen(fd, content, strlen(content)); //send it to client
-       // rio_readlineb(&rios, content, MAXLINE); //red more from server
     }
 
+    free(port);
     Close(clientfd);
 }
 
@@ -128,7 +130,7 @@ void fetch(int fd){
  * pathname must already be allocated and should be at least MAXLINE
  * bytes. Return -1 if there are any problems.
  */
-int parse_uri(char *uri, char *hostname, char *pathname, int *port)
+int parse_uri(char *uri, char *hostname, char *pathname, char *port)
 {
     char *hostbegin;
     char *hostend;
@@ -148,9 +150,10 @@ int parse_uri(char *uri, char *hostname, char *pathname, int *port)
     hostname[len] = '\0';
 
     /* Extract the port number */
-    *port = 80; /* default */
     if (*hostend == ':')
-        *port = atoi(hostend + 1);
+        strcpy(port,*(hostend + 1));
+    else
+        strcpy(port,"80");/* default */
 
     /* Extract the path */
     pathbegin = strchr(hostbegin, '/');
