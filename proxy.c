@@ -81,29 +81,35 @@ int startsWith(const char *pre, const char *str)
   return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
 }
 
+void drop(char *str, size_t n)
+{
+  size_t len = strlen(str);
+  if (n > len)
+    return;  // Or: n = len;
+  memmove(str, str+n, len - n + 1);
+}
+
 /*
  * send_header sends the header info to the client and returns the package size
  */
 ssize_t send_header(rio_t rios, int fd, int clientfd, char *newRequest)
 {
-  char* content[MAXLINE];
+  char *content = (char *)malloc(MAXLINE);
   ssize_t contentlen;
   ssize_t len = 0;
 
-
   rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
-
-
-  
   while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
     rio_writen(fd, content, strlen(content)); //send it to client
-    if(startsWith("Content Length:",content)){
-      content += 15;
+    printf("%s",content);
+    if(startsWith("Content-Length:",content)){
+      drop(content,15);
       len = atoi(content);
     }
-    if(strcmp(content,"\r\n"))
+    if(strcmp(content,"\r\n")==0)
       break;
   }
+  free(content);
   return len;
 }
 
@@ -161,7 +167,7 @@ void fetch(int fd){
     rio_t rios;
     rio_readinitb(&rios, clientfd);
     ssize_t len = send_header(rios,fd,clientfd,newRequest);
-    send_html_data(rios,fd,clientfd,newRequest,len);
+    send_data(rios,fd,clientfd,newRequest,len);
     Close(clientfd);
 }
 
