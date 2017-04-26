@@ -180,24 +180,19 @@ void format_log_entry(char *logstring, struct sockaddr_in *sockaddr,
     char time_str[MAXLINE];
     unsigned long host;
     unsigned char a, b, c, d;
+    struct in_addr inaddr;
+    char addr[MAXBUF];
 
     /* Get a formatted time string */
     now = time(NULL);
     strftime(time_str, MAXLINE, "%a %d %b %Y %H:%M:%S %Z", localtime(&now));
 
-    /* 
-     * Next, convert the IP address in network byte order to dotted decimal
-     * form. Note that we could have used inet_ntoa, but chose not to
-     * because inet_ntoa is a Class 3 thread unsafe function that
-     * returns a pointer to a static variable (Ch 13, CS:APP).
-     */
+    //convert the IP address in network byte order to dotted decimal form
+    if(!inet_ntop(AF_INET,&(sockaddr->sin_addr.s_addr),addr, MAXBUF))
+        unix_error("inet_ntop");
 
-    // for the student to do...
-
-    /* Finally, store (and return) the formatted log entry string in logstring */
-
-    // for the student to do...
-
+    //storing the formatted log entry string in logstring
+    sprintf(logstring, "%s %s %s %d\n", time_str, addr, uri, size);
 }
 
 /*
