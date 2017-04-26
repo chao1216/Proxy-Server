@@ -4,7 +4,7 @@
  * TEAM MEMBERS:  put your name(s) and e-mail addresses here
  *     Howard the Duck, howie@duck.sewanee.edu
  *     James Q. Pleebus, pleebles@q.sewanee.edu
- * 
+ *
  * IMPORTANT: Give a high level description of your code here. You
  * must also provide a header comment at the beginning of each
  * function that describes what that function does.
@@ -29,8 +29,8 @@ void fetch(int fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
 
-/* 
- * main - Main routine for the proxy program 
+/*
+ * main - Main routine for the proxy program
  */
 int main(int argc, char **argv)
 {
@@ -53,14 +53,69 @@ int main(int argc, char **argv)
     }
 }
 
+/*
+ * send_html_data takes the file descriptors and the buffers,
+ * and sends over the html file
+ */
+void send_html_data(int fd, int clientfd, char *newRequest)
+{
+
+  char* content[MAXLINE];
+  ssize_t contentlen;
+  rio_t rios; //for server
+
+
+  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
+
+
+  rio_readinitb(&rios, clientfd);
+  while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
+    rio_writen(fd, content, strlen(content)); //send it to client
+    // rio_readlineb(&rios, content, MAXLINE); //red more from server
+  }
+
+}
+
+/*
+ * send_other_data sends all data for which null symbols are not a useful indicator
+ */
+void send_other_data(int fd, int clientfd, char *newRequest)
+{
+  
+}
+
+/*
+ * check if a string ends with a suffix
+ */
+int endsWith(const char *str, const char *suffix)
+{
+  if (!str || !suffix)
+    return 0;
+  size_t lenstr = strlen(str);
+  size_t lensuffix = strlen(suffix);
+  if (lensuffix >  lenstr)
+    return 0;
+  return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}
+
+/*
+ * is_html determines if the file being sent back is html or not.
+ * 1 if html, 0 otherwise
+ */
+int is_html(char *path){
+  if(strcmp(path,"/") == 0 ||
+     strcmp(path,"") == 0)
+    return 1;
+  return endsWith(path,".html");
+}
+
 void fetch(int fd){
     struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
     int port;
     rio_t rioc; //for client
-    rio_t rios; //for server
-
+    
     int clientfd; //for this proxy to connect to web server
 
     /* Read request line and headers */
@@ -78,7 +133,7 @@ void fetch(int fd){
     //read_requesthdrs(&rio);
 
     int stat = parse_uri(uri,hostname,pathname,&port); //get hostname and pathname from uri
-    if(stat!=0){ //returns -1 if problem
+    if(stat != 0){ //returns -1 if problem
         clienterror(fd, uri, "505", "??????",".....");
         return;
     }
@@ -93,12 +148,11 @@ void fetch(int fd){
     sprintf(newRequest, "%sUser-Agent: %s\r\n",newRequest,user_agent_hdr);
     sprintf(newRequest, "%sConnection: close\r\n", newRequest);
     sprintf(newRequest, "%sProxy-Connection: close\r\n\r\n", newRequest);
+    //sprintf(newRequest, "%s\r\n\r\n",newRequest);
 
     //printf("%s", newRequest);
     //printf("%d\n", port);
 
-    char* content[MAXLINE];
-    ssize_t contentlen;
 
     //now need to make connection with web server
     //clientfd = open_clientfd(hostname, (char*)&port); //not reading port correctly
@@ -106,23 +160,14 @@ void fetch(int fd){
 
     //printf("%d\n", clientfd);
 
-
-    rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
-
-
-    rio_readinitb(&rios, clientfd);
-    while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
-        rio_writen(fd, content, strlen(content)); //send it to client
-       // rio_readlineb(&rios, content, MAXLINE); //red more from server
-    }
-
+    if(is_html(pathname))
+      send_html_data(fd,clientfd,newRequest);
     Close(clientfd);
 }
 
-
 /*
  * parse_uri - URI parser
- * 
+ *
  * Given a URI from an HTTP proxy GET request (i.e., a URL), extract
  * the host name, path name, and port.  The memory for hostname and
  * pathname must already be allocated and should be at least MAXLINE
