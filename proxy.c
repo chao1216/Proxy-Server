@@ -57,56 +57,54 @@ int main(int argc, char **argv)
  * send_html_data takes the file descriptors and the buffers,
  * and sends over the html file
  */
-void send_html_data(int fd, int clientfd, char *newRequest)
+void send_data(rio_t rios, int fd, int clientfd, char *newRequest, ssize_t len)
 {
 
   char* content[MAXLINE];
   ssize_t contentlen;
-  rio_t rios; //for server
+
+
+  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
+
+  while (rio_readlineb(&rios, content, MAXLINE) != NULL && len > 0) {
+    ssize_t tmp = rio_writen(fd, content, tmp); //send it to client
+    // rio_readlineb(&rios, content, MAXLINE); //red more from server
+    len -= tmp;
+  }
+
+}
+
+int startsWith(const char *pre, const char *str)
+{
+  size_t lenpre = strlen(pre),
+    lenstr = strlen(str);
+  return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
+}
+
+/*
+ * send_header sends the header info to the client and returns the package size
+ */
+ssize_t send_header(rio_t rios, int fd, int clientfd, char *newRequest)
+{
+  char* content[MAXLINE];
+  ssize_t contentlen;
+  ssize_t len = 0;
 
 
   rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
 
 
-  rio_readinitb(&rios, clientfd);
+  
   while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
     rio_writen(fd, content, strlen(content)); //send it to client
-    // rio_readlineb(&rios, content, MAXLINE); //red more from server
+    if(startsWith("Content Length:",content)){
+      content += 15;
+      len = atoi(content);
+    }
+    if(strcmp(content,"\r\n"))
+      break;
   }
-
-}
-
-/*
- * send_other_data sends all data for which null symbols are not a useful indicator
- */
-void send_other_data(int fd, int clientfd, char *newRequest)
-{
-  
-}
-
-/*
- * check if a string ends with a suffix
- */
-int endsWith(const char *str, const char *suffix)
-{
-  if (!str || !suffix)
-    return 0;
-  size_t lenstr = strlen(str);
-  size_t lensuffix = strlen(suffix);
-  if (lensuffix >  lenstr)
-    return 0;
-  return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
-}
-
-/*
- * is_html determines if the file being sent back is html or not.
- * 1 if html, 0 otherwise
- */
-int is_html(char *path){
-  if(strcmp(path,"/") == 0 ||
-     strcmp(path,"") == 0)
-    return 1;
-  return endsWith(path,".html");
+  return len;
 }
 
 void fetch(int fd){
@@ -150,7 +148,7 @@ void fetch(int fd){
     sprintf(newRequest, "%sProxy-Connection: close\r\n\r\n", newRequest);
     //sprintf(newRequest, "%s\r\n\r\n",newRequest);
 
-    //printf("%s", newRequest);
+    printf("%s", newRequest);
     //printf("%d\n", port);
 
 
@@ -160,8 +158,10 @@ void fetch(int fd){
 
     //printf("%d\n", clientfd);
 
-    if(is_html(pathname))
-      send_html_data(fd,clientfd,newRequest);
+    rio_t rios;
+    rio_readinitb(&rios, clientfd);
+    ssize_t len = send_header(rios,fd,clientfd,newRequest);
+    send_html_data(rios,fd,clientfd,newRequest,len);
     Close(clientfd);
 }
 
