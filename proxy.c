@@ -28,7 +28,7 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
 /*
  * Function prototypes
  */
-int parse_uri(char *uri, char *target_addr, char *path, int  *port);
+int parse_uri(char *uri, char *target_addr, char *path, char  *port);
 void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, int size);
 void send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
@@ -106,7 +106,8 @@ void fetch(int fd){
     struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
-    int port;
+    //int port;
+    char* port = (char*)malloc(sizeof(char)*20);
     rio_t rioc; //for client
     int clientfd; //for this proxy to connect to web server
 
@@ -124,8 +125,8 @@ void fetch(int fd){
     }
     //read_requesthdrs(&rio);
 
-    int stat = parse_uri(uri,hostname,pathname,&port); //get hostname and pathname from uri
-    if(stat != 0){ //returns -1 if problem
+    int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
+    if(stat!=0){ //returns -1 if problem
         clienterror(fd, uri, "505", "??????",".....");
         return;
     }
@@ -146,16 +147,20 @@ void fetch(int fd){
     //printf("%d\n", port);
 
 
+   // printf("%s\n", port);
+
     //now need to make connection with web server
-    //clientfd = open_clientfd(hostname, (char*)&port); //not reading port correctly
-    clientfd = open_clientfd(hostname, "80");
+    clientfd = open_clientfd(hostname, port);
 
     //printf("%d\n", clientfd);
 
     rio_t rios;
     rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
     rio_readinitb(&rios, clientfd);
+
     send_data(rios,fd,clientfd,newRequest);
+
+    free(port);
     Close(clientfd);
 }
 
@@ -167,7 +172,7 @@ void fetch(int fd){
  * pathname must already be allocated and should be at least MAXLINE
  * bytes. Return -1 if there are any problems.
  */
-int parse_uri(char *uri, char *hostname, char *pathname, int *port)
+int parse_uri(char *uri, char *hostname, char *pathname, char *port)
 {
     char *hostbegin;
     char *hostend;
@@ -187,9 +192,10 @@ int parse_uri(char *uri, char *hostname, char *pathname, int *port)
     hostname[len] = '\0';
 
     /* Extract the port number */
-    *port = 80; /* default */
     if (*hostend == ':')
-        *port = atoi(hostend + 1);
+        strcpy(port,*(hostend + 1));
+    else
+        strcpy(port,"80");/* default */
 
     /* Extract the path */
     pathbegin = strchr(hostbegin, '/');
@@ -219,24 +225,19 @@ void format_log_entry(char *logstring, struct sockaddr_in *sockaddr,
     char time_str[MAXLINE];
     unsigned long host;
     unsigned char a, b, c, d;
+    struct in_addr inaddr;
+    char addr[MAXBUF];
 
     /* Get a formatted time string */
     now = time(NULL);
     strftime(time_str, MAXLINE, "%a %d %b %Y %H:%M:%S %Z", localtime(&now));
 
-    /* 
-     * Next, convert the IP address in network byte order to dotted decimal
-     * form. Note that we could have used inet_ntoa, but chose not to
-     * because inet_ntoa is a Class 3 thread unsafe function that
-     * returns a pointer to a static variable (Ch 13, CS:APP).
-     */
+    //convert the IP address in network byte order to dotted decimal form
+    if(!inet_ntop(AF_INET,&(sockaddr->sin_addr.s_addr),addr, MAXBUF))
+        unix_error("inet_ntop");
 
-    // for the student to do...
-
-    /* Finally, store (and return) the formatted log entry string in logstring */
-
-    // for the student to do...
-
+    //storing the formatted log entry string in logstring
+    sprintf(logstring, "%s %s %s %d\n", time_str, addr, uri, size);
 }
 
 /*
