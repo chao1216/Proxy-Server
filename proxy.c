@@ -29,10 +29,10 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
  * Function prototypes
  */
 int parse_uri(char *uri, char *target_addr, char *path, char  *port);
-void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, int size);
+void format_log_entry(char *logstring, struct sockaddr_in *clientaddr, char *uri, int size);
 void send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
-void fetch(int fd);
+void fetch(int fd,  struct sockaddr_in *clientaddr)  ;
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
 
@@ -43,7 +43,8 @@ int main(int argc, char **argv)
 {
     int listenfd, connfd;
     socklen_t clientlen;
-    struct sockaddr_storage clientaddr;  /* Enough space for any address */  //line:netp:echoserveri:sockaddrstorage
+    struct sockaddr_storage clientaddr;  /* Enough space for any address */
+    //struct in_addr *clientaddr;
     char client_hostname[MAXLINE], client_port[MAXLINE];
 
     if (argc != 2) {
@@ -54,8 +55,8 @@ int main(int argc, char **argv)
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         clientlen = sizeof(struct sockaddr_storage);
-        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        fetch(connfd);
+        connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
+        fetch(connfd, (struct sockaddr_in*)&(clientaddr));
         Close(connfd);
     }
 }
@@ -72,6 +73,8 @@ int startsWith(const char *pre, const char *str)
  */
 void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
+ // int size = 0;
+
   struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
   char content[MAXLINE];
   ssize_t len = 0;
@@ -86,6 +89,7 @@ void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
     if(startsWith("Content-Length:",content)){
       char *tmp = strchr(content,' ');
       data->len = atoi(tmp);
+      //size += data->len;
     }
     if(strcmp(content,"\r\n")==0)
       break;
@@ -102,7 +106,10 @@ void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
   }
 }
 
-void fetch(int fd){
+void fetch(int fd, struct sockaddr_in *clientaddr){
+    FILE* logFile;
+    char* logstring = (char*)malloc(sizeof(char)*MAXLINE);
+    
     struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
@@ -141,25 +148,23 @@ void fetch(int fd){
     sprintf(newRequest, "%sUser-Agent: %s\r\n",newRequest,user_agent_hdr);
     sprintf(newRequest, "%sConnection: close\r\n", newRequest);
     sprintf(newRequest, "%sProxy-Connection: close\r\n\r\n", newRequest);
-    //sprintf(newRequest, "%s\r\n\r\n",newRequest);
-
-    //printf("%s", newRequest);
-    //printf("%d\n", port);
-
-
-   // printf("%s\n", port);
 
     //now need to make connection with web server
     clientfd = open_clientfd(hostname, port);
-
-    //printf("%d\n", clientfd);
 
     rio_t rios;
     rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
     rio_readinitb(&rios, clientfd);
 
-    send_data(rios,fd,clientfd,newRequest);
+    send_data(rios,fd,clientfd,newRequest);  //need to return num of bytes read
 
+    logFile = fopen("proxy.log","aw");
+    format_log_entry(logstring, clientaddr, hostname, 5000);
+    fprintf(logFile, "%s\n", logstring);
+    printf("%s\n", logstring);
+    fclose(logFile);
+    
+    free(logstring);
     free(port);
     Close(clientfd);
 }
@@ -218,7 +223,7 @@ int parse_uri(char *uri, char *hostname, char *pathname, char *port)
  * (sockaddr), the URI from the request (uri), and the size in bytes
  * of the response from the server (size).
  */
-void format_log_entry(char *logstring, struct sockaddr_in *sockaddr,
+void format_log_entry(char *logstring, struct sockaddr_in *clientaddr,
                       char *uri, int size)
 {
     time_t now;
@@ -232,9 +237,7 @@ void format_log_entry(char *logstring, struct sockaddr_in *sockaddr,
     now = time(NULL);
     strftime(time_str, MAXLINE, "%a %d %b %Y %H:%M:%S %Z", localtime(&now));
 
-    //convert the IP address in network byte order to dotted decimal form
-    if(!inet_ntop(AF_INET,&(sockaddr->sin_addr.s_addr),addr, MAXBUF))
-        unix_error("inet_ntop");
+    inet_ntop(AF_INET,&(clientaddr->sin_addr), addr, INET_ADDRSTRLEN);
 
     //storing the formatted log entry string in logstring
     sprintf(logstring, "%s %s %s %d\n", time_str, addr, uri, size);
