@@ -4,7 +4,7 @@
  * TEAM MEMBERS:  put your name(s) and e-mail addresses here
  *     Howard the Duck, howie@duck.sewanee.edu
  *     James Q. Pleebus, pleebles@q.sewanee.edu
- * 
+ *
  * IMPORTANT: Give a high level description of your code here. You
  * must also provide a header comment at the beginning of each
  * function that describes what that function does.
@@ -17,6 +17,11 @@
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
+struct reqData {
+  ssize_t len;
+  int ishtml;
+};
+
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 
@@ -25,12 +30,14 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
  */
 int parse_uri(char *uri, char *target_addr, char *path, char  *port);
 void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, int size);
+void send_data(rio_t rios, int fd, int clientfd, char *newRequest);
+int startsWith(const char *pre, const char *str);
 void fetch(int fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
 
-/* 
- * main - Main routine for the proxy program 
+/*
+ * main - Main routine for the proxy program
  */
 int main(int argc, char **argv)
 {
@@ -53,6 +60,48 @@ int main(int argc, char **argv)
     }
 }
 
+int startsWith(const char *pre, const char *str)
+{
+  size_t lenpre = strlen(pre),
+    lenstr = strlen(str);
+  return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
+}
+
+/*
+ * send_header sends the header info to the client and returns the package size
+ */
+void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
+{
+  struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
+  char content[MAXLINE];
+  ssize_t len = 0;
+
+  data->ishtml = 0;
+
+  while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
+    rio_writen(fd, content, strlen(content)); //send it to client
+    if(startsWith("Content-Type: text/html",content)){
+      data->ishtml = 1;
+    }
+    if(startsWith("Content-Length:",content)){
+      char *tmp = strchr(content,' ');
+      data->len = atoi(tmp);
+    }
+    if(strcmp(content,"\r\n")==0)
+      break;
+  }
+  if(data->ishtml){
+    while (rio_readlineb(&rios, content, MAXLINE) != NULL)
+      rio_writen(fd, content, strlen(content)); //send it to client
+  }
+  else{
+    while (rio_readnb(&rios, content, MAXLINE) != NULL && data->len > 0) {
+      ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
+      len -= tmp;
+    }
+  }
+}
+
 void fetch(int fd){
     struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
@@ -60,8 +109,6 @@ void fetch(int fd){
     //int port;
     char* port = (char*)malloc(sizeof(char)*20);
     rio_t rioc; //for client
-    rio_t rios; //for server
-
     int clientfd; //for this proxy to connect to web server
 
     /* Read request line and headers */
@@ -94,12 +141,11 @@ void fetch(int fd){
     sprintf(newRequest, "%sUser-Agent: %s\r\n",newRequest,user_agent_hdr);
     sprintf(newRequest, "%sConnection: close\r\n", newRequest);
     sprintf(newRequest, "%sProxy-Connection: close\r\n\r\n", newRequest);
+    //sprintf(newRequest, "%s\r\n\r\n",newRequest);
 
     //printf("%s", newRequest);
     //printf("%d\n", port);
 
-    char* content[MAXLINE];
-    ssize_t contentlen;
 
    // printf("%s\n", port);
 
@@ -108,23 +154,19 @@ void fetch(int fd){
 
     //printf("%d\n", clientfd);
 
-
+    rio_t rios;
     rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
-
-
     rio_readinitb(&rios, clientfd);
-    while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
-        rio_writen(fd, content, strlen(content)); //send it to client
-    }
+
+    send_data(rios,fd,clientfd,newRequest);
 
     free(port);
     Close(clientfd);
 }
 
-
 /*
  * parse_uri - URI parser
- * 
+ *
  * Given a URI from an HTTP proxy GET request (i.e., a URL), extract
  * the host name, path name, and port.  The memory for hostname and
  * pathname must already be allocated and should be at least MAXLINE
