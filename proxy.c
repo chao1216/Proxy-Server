@@ -30,6 +30,8 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
  */
 int parse_uri(char *uri, char *target_addr, char *path, int  *port);
 void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, int size);
+void send_data(rio_t rios, int fd, int clientfd, char *newRequest);
+int startsWith(const char *pre, const char *str);
 void fetch(int fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
@@ -58,31 +60,6 @@ int main(int argc, char **argv)
     }
 }
 
-/*
- * send_html_data takes the file descriptors and the buffers,
- * and sends over the html file
- */
-void send_data(rio_t rios, int fd, int clientfd, char *newRequest, ssize_t len)
-{
-
-  char* content[MAXLINE];
-
-  while (rio_readlineb(&rios, content, MAXLINE) != NULL && len > 0) {
-    ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
-    len -= tmp;
-  }
-
-}
-
-void send_html(rio_t rios, int fd, int clientfd, char *newRequest)
-{
-  char *content[MAXLINE];
-  while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
-    printf("%s",content);
-    rio_writen(fd, content, strlen(content)); //send it to client
-  }
-}
-
 int startsWith(const char *pre, const char *str)
 {
   size_t lenpre = strlen(pre),
@@ -90,21 +67,13 @@ int startsWith(const char *pre, const char *str)
   return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
 }
 
-void drop(char *str, size_t n)
-{
-  size_t len = strlen(str);
-  if (n > len)
-    return;  // Or: n = len;
-  memmove(str, str+n, len - n + 1);
-}
-
 /*
  * send_header sends the header info to the client and returns the package size
  */
-struct reqData *send_header(rio_t rios, int fd, int clientfd, char *newRequest)
+void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
   struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
-  char *content = (char *)malloc(MAXLINE);
+  char content[MAXLINE];
   ssize_t len = 0;
 
   data->ishtml = 0;
@@ -115,14 +84,22 @@ struct reqData *send_header(rio_t rios, int fd, int clientfd, char *newRequest)
       data->ishtml = 1;
     }
     if(startsWith("Content-Length:",content)){
-      drop(content,15);
-      data->len = atoi(content);
+      char *tmp = strchr(content,' ');
+      data->len = atoi(tmp);
     }
     if(strcmp(content,"\r\n")==0)
       break;
   }
-  free(content);
-  return data;
+  if(data->ishtml){
+    while (rio_readlineb(&rios, content, MAXLINE) != NULL)
+      rio_writen(fd, content, strlen(content)); //send it to client
+  }
+  else{
+    while (rio_readnb(&rios, content, MAXLINE) != NULL && data->len > 0) {
+      ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
+      len -= tmp;
+    }
+  }
 }
 
 void fetch(int fd){
@@ -131,7 +108,6 @@ void fetch(int fd){
     char hostname[MAXLINE], pathname[MAXLINE];
     int port;
     rio_t rioc; //for client
-    
     int clientfd; //for this proxy to connect to web server
 
     /* Read request line and headers */
@@ -179,12 +155,7 @@ void fetch(int fd){
     rio_t rios;
     rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
     rio_readinitb(&rios, clientfd);
-    struct reqData *data = send_header(rios,fd,clientfd,newRequest);
-    if(data->ishtml)
-      send_html(rios,fd,clientfd,newRequest);
-    else
-      send_data(rios,fd,clientfd,newRequest,data->len);
-    free(data);
+    send_data(rios,fd,clientfd,newRequest);
     Close(clientfd);
 }
 
