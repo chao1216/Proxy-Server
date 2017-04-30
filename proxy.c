@@ -29,12 +29,11 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
  * Function prototypes
  */
 int parse_uri(char *uri, char *target_addr, char *path, char  *port);
-void format_log_entry(char *logstring, struct sockaddr_in *clientaddr, char *uri, int size);
-void send_data(rio_t rios, int fd, int clientfd, char *newRequest);
+void format_log_entry(char *logstring, char* ipstr, char *uri, int size);
+int send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
-void fetch(int fd,  struct sockaddr_in *clientaddr)  ;
+void fetch(int fd,  char* ipstr)  ;
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
-
 
 /*
  * main - Main routine for the proxy program
@@ -43,9 +42,9 @@ int main(int argc, char **argv)
 {
     int listenfd, connfd;
     socklen_t clientlen;
-    struct sockaddr_storage clientaddr;  /* Enough space for any address */
-    //struct in_addr *clientaddr;
-    char client_hostname[MAXLINE], client_port[MAXLINE];
+    char hostname[MAXLINE], port[MAXLINE];
+    
+    struct sockaddr_storage clientaddr;/* Enough space for any address */
 
     if (argc != 2) {
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -54,12 +53,16 @@ int main(int argc, char **argv)
 
     listenfd = Open_listenfd(argv[1]);
     while (1) {
-        clientlen = sizeof(struct sockaddr_storage);
+        clientlen = sizeof(clientaddr);
+
         connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
-        fetch(connfd, (struct sockaddr_in*)&(clientaddr));
+        Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE,
+                            port, MAXLINE, NI_NUMERICHOST);
+        fetch(connfd, hostname);
         Close(connfd);
     }
 }
+
 
 int startsWith(const char *pre, const char *str)
 {
@@ -71,17 +74,17 @@ int startsWith(const char *pre, const char *str)
 /*
  * send_header sends the header info to the client and returns the package size
  */
-void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
+int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
- // int size = 0;
-
   struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
   char content[MAXLINE];
   ssize_t len = 0;
 
   data->ishtml = 0;
 
-  while (rio_readlineb(&rios, content, MAXLINE) != NULL) {
+  int bytesRead = 0;
+    
+  while (rio_readlineb(&rios, content, MAXLINE)) {
     rio_writen(fd, content, strlen(content)); //send it to client
     if(startsWith("Content-Type: text/html",content)){
       data->ishtml = 1;
@@ -89,28 +92,32 @@ void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
     if(startsWith("Content-Length:",content)){
       char *tmp = strchr(content,' ');
       data->len = atoi(tmp);
-      //size += data->len;
+      bytesRead += data->len; //bytes for text
     }
     if(strcmp(content,"\r\n")==0)
       break;
   }
+
   if(data->ishtml){
-    while (rio_readlineb(&rios, content, MAXLINE) != NULL)
+    while (rio_readlineb(&rios, content, MAXLINE))
       rio_writen(fd, content, strlen(content)); //send it to client
   }
   else{
-    while (rio_readnb(&rios, content, MAXLINE) != NULL && data->len > 0) {
+    while (rio_readnb(&rios, content, MAXLINE) && data->len > 0) {
       ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
       len -= tmp;
+      bytesRead += tmp; //bytes for binary data
     }
   }
+
+  return bytesRead;
 }
 
-void fetch(int fd, struct sockaddr_in *clientaddr){
+void fetch(int fd, char* ipaddr){
     FILE* logFile;
     char* logstring = (char*)malloc(sizeof(char)*MAXLINE);
     
-    struct stat sbuf;
+    //struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
     //int port;
@@ -156,15 +163,18 @@ void fetch(int fd, struct sockaddr_in *clientaddr){
     rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
     rio_readinitb(&rios, clientfd);
 
-    send_data(rios,fd,clientfd,newRequest);  //need to return num of bytes read
+    int bytes = send_data(rios,fd,clientfd,newRequest);  //need to return num of bytes read
 
-    logFile = fopen("proxy.log","aw");
-    format_log_entry(logstring, clientaddr, hostname, 5000);
-    fprintf(logFile, "%s\n", logstring);
-    printf("%s\n", logstring);
+    //logging file
+    if((logFile = fopen("proxy.log","aw"))== NULL){
+        printf("Cannot open log file\n");
+    }
+    format_log_entry(logstring, ipaddr, hostname, bytes);
+    fprintf(logFile, "%s", logstring);
+    //printf("%s\n", logstring);
     fclose(logFile);
     
-    free(logstring);
+    free(logstring);      
     free(port);
     Close(clientfd);
 }
@@ -198,7 +208,7 @@ int parse_uri(char *uri, char *hostname, char *pathname, char *port)
 
     /* Extract the port number */
     if (*hostend == ':')
-        strcpy(port,*(hostend + 1));
+        strcpy(port,(hostend + 1));
     else
         strcpy(port,"80");/* default */
 
@@ -223,24 +233,21 @@ int parse_uri(char *uri, char *hostname, char *pathname, char *port)
  * (sockaddr), the URI from the request (uri), and the size in bytes
  * of the response from the server (size).
  */
-void format_log_entry(char *logstring, struct sockaddr_in *clientaddr,
-                      char *uri, int size)
+void format_log_entry(char *logstring, char* ipaddr, char *uri, int size)
 {
     time_t now;
     char time_str[MAXLINE];
-    unsigned long host;
-    unsigned char a, b, c, d;
-    struct in_addr inaddr;
-    char addr[MAXBUF];
+    //unsigned long host;
+    //unsigned char a, b, c, d;
+    //struct in_addr inaddr;
+    //char addr[MAXBUF];
 
     /* Get a formatted time string */
     now = time(NULL);
     strftime(time_str, MAXLINE, "%a %d %b %Y %H:%M:%S %Z", localtime(&now));
 
-    inet_ntop(AF_INET,&(clientaddr->sin_addr), addr, INET_ADDRSTRLEN);
-
     //storing the formatted log entry string in logstring
-    sprintf(logstring, "%s %s %s %d\n", time_str, addr, uri, size);
+    sprintf(logstring, "%s %s %s %d\n", time_str, ipaddr, uri, size);
 }
 
 /*
