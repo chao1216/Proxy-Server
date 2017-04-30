@@ -40,27 +40,27 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
  */
 int main(int argc, char **argv)
 {
-    int listenfd, connfd;
-    socklen_t clientlen;
-    char hostname[MAXLINE], port[MAXLINE];
+  int listenfd, connfd;
+  socklen_t clientlen;
+  char hostname[MAXLINE], port[MAXLINE];
     
-    struct sockaddr_storage clientaddr;/* Enough space for any address */
+  struct sockaddr_storage clientaddr;/* Enough space for any address */
 
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <port>\n", argv[0]);
-        exit(0);
-    }
+  if (argc != 2) {
+    fprintf(stderr, "usage: %s <port>\n", argv[0]);
+    exit(0);
+  }
 
-    listenfd = Open_listenfd(argv[1]);
-    while (1) {
-        clientlen = sizeof(clientaddr);
+  listenfd = Open_listenfd(argv[1]);
+  while (1) {
+    clientlen = sizeof(clientaddr);
 
-        connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
-        Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE,
-                            port, MAXLINE, NI_NUMERICHOST);
-        fetch(connfd, hostname);
-        Close(connfd);
-    }
+    connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
+    Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE,
+                      port, MAXLINE, NI_NUMERICHOST);
+    fetch(connfd, hostname);
+    Close(connfd);
+  }
 }
 
 
