@@ -150,11 +150,12 @@ void fetch(int fd, char* ipaddr){
     char newRequest[MAXBUF];
     char *v = "HTTP/1.0";
 
-    sprintf(newRequest, "%s /%s %s\r\n",method,pathname,v);
-    sprintf(newRequest, "%sHost: %s\r\n",newRequest, hostname);
-    sprintf(newRequest, "%sUser-Agent: %s\r\n",newRequest,user_agent_hdr);
-    sprintf(newRequest, "%sConnection: close\r\n", newRequest);
-    sprintf(newRequest, "%sProxy-Connection: close\r\n\r\n", newRequest);
+    sprintf(newRequest,"%s /%s %s\r\n"
+                       "Host: %s\r\n"
+                       "User-Agent: %s\r\n"
+                       "Connection: close\r\n"
+                       "Proxy-Connection:close\r\n\r\n",
+                       method,pathname,v,hostname,user_agent_hdr);
 
     //now need to make connection with web server
     clientfd = open_clientfd(hostname, port);
@@ -171,7 +172,6 @@ void fetch(int fd, char* ipaddr){
     }
     format_log_entry(logstring, ipaddr, hostname, bytes);
     fprintf(logFile, "%s", logstring);
-    //printf("%s\n", logstring);
     fclose(logFile);
     
     free(logstring);      
