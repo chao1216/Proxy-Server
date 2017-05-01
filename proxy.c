@@ -53,16 +53,18 @@ int main(int argc, char **argv)
 
   listenfd = Open_listenfd(argv[1]);
   while (1) {
-    clientlen = sizeof(clientaddr);
+    //SIGPIPE - client disconnects prematurely
+    signal(SIGPIPE, SIG_IGN); //catching SIGPIPE and ignoring it
 
+    clientlen = sizeof(clientaddr);
     connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
+    //clientaddr.ss_family = AF_INET;
     Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE,
                       port, MAXLINE, NI_NUMERICHOST);
     fetch(connfd, hostname);
     Close(connfd);
   }
 }
-
 
 int startsWith(const char *pre, const char *str)
 {
@@ -154,7 +156,7 @@ void fetch(int fd, char* ipaddr){
                        "Host: %s\r\n"
                        "User-Agent: %s\r\n"
                        "Connection: close\r\n"
-                       "Proxy-Connection:close\r\n\r\n",
+                       "Proxy-Connection: close\r\n\r\n",
                        method,pathname,v,hostname,user_agent_hdr);
 
     //now need to make connection with web server
@@ -222,7 +224,6 @@ int parse_uri(char *uri, char *hostname, char *pathname, char *port)
         strcpy(pathname, pathbegin);
     }
 
-
     return 0;
 }
 
@@ -237,10 +238,6 @@ void format_log_entry(char *logstring, char* ipaddr, char *uri, int size)
 {
     time_t now;
     char time_str[MAXLINE];
-    //unsigned long host;
-    //unsigned char a, b, c, d;
-    //struct in_addr inaddr;
-    //char addr[MAXBUF];
 
     /* Get a formatted time string */
     now = time(NULL);
