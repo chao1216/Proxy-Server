@@ -32,7 +32,7 @@ int parse_uri(char *uri, char *target_addr, char *path, char  *port);
 void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, int size);
 void send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
-void fetch(int fd);
+void *fetch(void *thread_fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
 
@@ -41,7 +41,7 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
  */
 int main(int argc, char **argv)
 {
-    int listenfd, connfd;
+  int listenfd, *connfd;
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;  /* Enough space for any address */  //line:netp:echoserveri:sockaddrstorage
     char client_hostname[MAXLINE], client_port[MAXLINE];
@@ -54,9 +54,10 @@ int main(int argc, char **argv)
     listenfd = Open_listenfd(argv[1]);
     while (1) {
         clientlen = sizeof(struct sockaddr_storage);
-        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        fetch(connfd);
-        Close(connfd);
+        connfd = Malloc(sizeof(int));
+        *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        pthread_t tid;
+        Pthread_create(&tid,NULL,fetch,connfd);
     }
 }
 
@@ -102,7 +103,10 @@ void send_data(rio_t rios, int fd, int clientfd, char *newRequest)
   }
 }
 
-void fetch(int fd){
+void *fetch(void *thread_fd){
+  int fd = *((int *)thread_fd);
+  Pthread_detach(pthread_self());
+  Free(thread_fd);
     struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
@@ -114,21 +118,21 @@ void fetch(int fd){
     /* Read request line and headers */
     rio_readinitb(&rioc, fd);
     if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
-        return;
+        return NULL;
 
     //printf("%s", request); // buf holds HTTP request
 
     sscanf(request, "%s %s %s", method, uri, version);   //parsing request
     if (strcasecmp(method, "GET")) {                 //checks method
         clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
-        return;
+        return NULL;
     }
     //read_requesthdrs(&rio);
 
     int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
     if(stat!=0){ //returns -1 if problem
         clienterror(fd, uri, "505", "??????",".....");
-        return;
+        return NULL;
     }
 
     //printf("%s\n", request)
@@ -164,6 +168,8 @@ Proxy-Connection: close\r\n\
 
     free(port);
     Close(clientfd);
+    Close(fd);
+    return NULL;
 }
 
 /*
