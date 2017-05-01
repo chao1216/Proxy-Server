@@ -139,7 +139,7 @@ void *fetch(void *thread_fd){
   char newRequest[MAXBUF];
   char *v = "HTTP/1.0";
 
-  char *sprint = "%s /%s $s\r\n\
+  char *sprint = "%s /%s %s\r\n\
 Host: %s\r\n\
 User-Agent: %s\r\n\
 Connection: close\r\n\
