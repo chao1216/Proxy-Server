@@ -107,69 +107,68 @@ void *fetch(void *thread_fd){
   int fd = *((int *)thread_fd);
   Pthread_detach(pthread_self());
   Free(thread_fd);
-    struct stat sbuf;
-    char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char hostname[MAXLINE], pathname[MAXLINE];
-    //int port;
-    char* port = (char*)malloc(sizeof(char)*20);
-    rio_t rioc; //for client
-    int clientfd; //for this proxy to connect to web server
+  struct stat sbuf;
+  char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+  char hostname[MAXLINE], pathname[MAXLINE];
+  //int port;
+  char* port = (char*)malloc(sizeof(char)*20);
+  rio_t rioc; //for client
+  int clientfd; //for this proxy to connect to web server
 
-    /* Read request line and headers */
-    rio_readinitb(&rioc, fd);
-    if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
-        return NULL;
+  /* Read request line and headers */
+  rio_readinitb(&rioc, fd);
+  if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
+    return NULL;
 
-    //printf("%s", request); // buf holds HTTP request
+  //printf("%s", request); // buf holds HTTP request
+  sscanf(request, "%s %s %s", method, uri, version);   //parsing request
+  if (strcasecmp(method, "GET")) {                 //checks method
+    clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
+    return NULL;
+  }
+  //read_requesthdrs(&rio);
 
-    sscanf(request, "%s %s %s", method, uri, version);   //parsing request
-    if (strcasecmp(method, "GET")) {                 //checks method
-        clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
-        return NULL;
-    }
-    //read_requesthdrs(&rio);
+  int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
+  if(stat!=0){ //returns -1 if problem
+    clienterror(fd, uri, "505", "??????",".....");
+    return NULL;
+  }
 
-    int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
-    if(stat!=0){ //returns -1 if problem
-        clienterror(fd, uri, "505", "??????",".....");
-        return NULL;
-    }
+  //printf("%s\n", request)
 
-    //printf("%s\n", request)
+  char newRequest[MAXBUF];
+  char *v = "HTTP/1.0";
 
-    char newRequest[MAXBUF];
-    char *v = "HTTP/1.0";
-
-    char *sprint = "%s /%s $s\r\n\
+  char *sprint = "%s /%s $s\r\n\
 Host: %s\r\n\
 User-Agent: %s\r\n\
 Connection: close\r\n\
 Proxy-Connection: close\r\n\
 \r\n";
 
-    sprintf(newRequest,sprint,method,pathname,v,hostname,user_agent_hdr);
+  sprintf(newRequest,sprint,method,pathname,v,hostname,user_agent_hdr);
 
-    //printf("%s", newRequest);
-    //printf("%d\n", port);
+  //printf("%s", newRequest);
+  //printf("%d\n", port);
 
 
-   // printf("%s\n", port);
+  // printf("%s\n", port);
 
-    //now need to make connection with web server
-    clientfd = open_clientfd(hostname, port);
+  //now need to make connection with web server
+  clientfd = open_clientfd(hostname, port);
 
-    //printf("%d\n", clientfd);
+  //printf("%d\n", clientfd);
 
-    rio_t rios;
-    rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
-    rio_readinitb(&rios, clientfd);
+  rio_t rios;
+  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
+  rio_readinitb(&rios, clientfd);
 
-    send_data(rios,fd,clientfd,newRequest);
+  send_data(rios,fd,clientfd,newRequest);
 
-    free(port);
-    Close(clientfd);
-    Close(fd);
-    return NULL;
+  Free(port);
+  Close(clientfd);
+  Close(fd);
+  return NULL;
 }
 
 /*
