@@ -32,7 +32,7 @@ int parse_uri(char *uri, char *target_addr, char *path, char  *port);
 void format_log_entry(char *logstring, char* ipstr, char *uri, int size);
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
-void fetch(int fd,  char* ipstr)  ;
+void *fetch(void *thread_fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
 /*
@@ -40,27 +40,24 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
  */
 int main(int argc, char **argv)
 {
-  int listenfd, connfd;
-  socklen_t clientlen;
-  char hostname[MAXLINE], port[MAXLINE];
-    
-  struct sockaddr_storage clientaddr;/* Enough space for any address */
+  int listenfd, *connfd;
+    socklen_t clientlen;
+    struct sockaddr_storage clientaddr;  /* Enough space for any address */  //line:netp:echoserveri:sockaddrstorage
+    char client_hostname[MAXLINE], client_port[MAXLINE];
 
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s <port>\n", argv[0]);
-    exit(0);
-  }
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(0);
+    }
 
-  listenfd = Open_listenfd(argv[1]);
-  while (1) {
-    clientlen = sizeof(clientaddr);
-
-    connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
-    Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE,
-                      port, MAXLINE, NI_NUMERICHOST);
-    fetch(connfd, hostname);
-    Close(connfd);
-  }
+    listenfd = Open_listenfd(argv[1]);
+    while (1) {
+        clientlen = sizeof(struct sockaddr_storage);
+        connfd = Malloc(sizeof(int));
+        *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        pthread_t tid;
+        Pthread_create(&tid,NULL,fetch,connfd);
+    }
 }
 
 
@@ -113,42 +110,41 @@ int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
   return bytesRead;
 }
 
-void fetch(int fd, char* ipaddr){
-    FILE* logFile;
-    char* logstring = (char*)malloc(sizeof(char)*MAXLINE);
-    
-    //struct stat sbuf;
-    char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char hostname[MAXLINE], pathname[MAXLINE];
-    //int port;
-    char* port = (char*)malloc(sizeof(char)*20);
-    rio_t rioc; //for client
-    int clientfd; //for this proxy to connect to web server
+void *fetch(void *thread_fd){
+  int fd = *((int *)thread_fd);
+  Pthread_detach(pthread_self());
+  Free(thread_fd);
+  struct stat sbuf;
+  char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+  char hostname[MAXLINE], pathname[MAXLINE];
+  //int port;
+  char* port = (char*)malloc(sizeof(char)*20);
+  rio_t rioc; //for client
+  int clientfd; //for this proxy to connect to web server
 
-    /* Read request line and headers */
-    rio_readinitb(&rioc, fd);
-    if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
-        return;
+  /* Read request line and headers */
+  rio_readinitb(&rioc, fd);
+  if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
+    return NULL;
 
-    //printf("%s", request); // buf holds HTTP request
+  //printf("%s", request); // buf holds HTTP request
+  sscanf(request, "%s %s %s", method, uri, version);   //parsing request
+  if (strcasecmp(method, "GET")) {                 //checks method
+    clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
+    return NULL;
+  }
+  //read_requesthdrs(&rio);
 
-    sscanf(request, "%s %s %s", method, uri, version);   //parsing request
-    if (strcasecmp(method, "GET")) {                 //checks method
-        clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
-        return;
-    }
-    //read_requesthdrs(&rio);
+  int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
+  if(stat!=0){ //returns -1 if problem
+    clienterror(fd, uri, "505", "??????",".....");
+    return NULL;
+  }
 
-    int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
-    if(stat!=0){ //returns -1 if problem
-        clienterror(fd, uri, "505", "??????",".....");
-        return;
-    }
+  //printf("%s\n", request)
 
-    //printf("%s\n", request)
-
-    char newRequest[MAXBUF];
-    char *v = "HTTP/1.0";
+  char newRequest[MAXBUF];
+  char *v = "HTTP/1.0";
 
     sprintf(newRequest,"%s /%s %s\r\n"
                        "Host: %s\r\n"
@@ -157,26 +153,21 @@ void fetch(int fd, char* ipaddr){
                        "Proxy-Connection:close\r\n\r\n",
                        method,pathname,v,hostname,user_agent_hdr);
 
-    //now need to make connection with web server
-    clientfd = open_clientfd(hostname, port);
+  //now need to make connection with web server
+  clientfd = open_clientfd(hostname, port);
 
-    rio_t rios;
-    rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
-    rio_readinitb(&rios, clientfd);
+  //printf("%d\n", clientfd);
 
-    int bytes = send_data(rios,fd,clientfd,newRequest);  //need to return num of bytes read
+  rio_t rios;
+  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
+  rio_readinitb(&rios, clientfd);
 
-    //logging file
-    if((logFile = fopen("proxy.log","aw"))== NULL){
-        printf("Cannot open log file\n");
-    }
-    format_log_entry(logstring, ipaddr, hostname, bytes);
-    fprintf(logFile, "%s", logstring);
-    fclose(logFile);
-    
-    free(logstring);      
-    free(port);
-    Close(clientfd);
+  send_data(rios,fd,clientfd,newRequest);
+
+  Free(port);
+  Close(clientfd);
+  Close(fd);
+  return NULL;
 }
 
 /*
