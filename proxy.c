@@ -18,8 +18,8 @@
 #define MAX_OBJECT_SIZE 102400
 
 struct reqData {
-  ssize_t len;
-  int ishtml;
+    ssize_t len;
+    int ishtml;
 };
 
 /* You won't lose style points for including this long line in your code */
@@ -29,48 +29,50 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
  * Function prototypes
  */
 int parse_uri(char *uri, char *target_addr, char *path, char  *port);
-void format_log_entry(char *logstring, char* ipstr, char *uri, int size);
+void format_log_entry(char *logstring, char *ipstr, char *uri, int size);
+void logFile(char *ipaddr, char *uri, int size);
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
-void fetch(int fd,  char* ipstr)  ;
+void *fetch(void *thread_fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
+char* getIpAddr(int fd);
 
 /*
  * main - Main routine for the proxy program
  */
 int main(int argc, char **argv)
 {
-  int listenfd, connfd;
-  socklen_t clientlen;
-  char hostname[MAXLINE], port[MAXLINE];
-    
-  struct sockaddr_storage clientaddr;/* Enough space for any address */
+    int listenfd, *connfd;
+    socklen_t clientlen;
+    struct sockaddr_storage clientaddr;
+    //char hostname[MAXLINE], port[MAXLINE];
 
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s <port>\n", argv[0]);
-    exit(0);
-  }
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(0);
+    }
 
-  listenfd = Open_listenfd(argv[1]);
-  while (1) {
-    //SIGPIPE - client disconnects prematurely
-    signal(SIGPIPE, SIG_IGN); //catching SIGPIPE and ignoring it
+    listenfd = Open_listenfd(argv[1]);
+    while (1) {
+      //SIGPIPE - client disconnects prematurely
+      signal(SIGPIPE, SIG_IGN); //catching SIGPIPE and ignoring it
 
-    clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA*)&clientaddr, &clientlen);
-    //clientaddr.ss_family = AF_INET;
-    Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE,
-                      port, MAXLINE, NI_NUMERICHOST);
-    fetch(connfd, hostname);
-    Close(connfd);
-  }
+      clientlen = sizeof(struct sockaddr_storage);
+      connfd = Malloc(sizeof(int));
+      *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+      pthread_t tid;
+      Pthread_create(&tid,NULL,fetch,connfd);
+    }
 }
 
+/*
+ * startsWith - checks beginning of a string
+ */
 int startsWith(const char *pre, const char *str)
 {
-  size_t lenpre = strlen(pre),
+    size_t lenpre = strlen(pre),
     lenstr = strlen(str);
-  return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
+    return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
 }
 
 /*
@@ -78,76 +80,117 @@ int startsWith(const char *pre, const char *str)
  */
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
-  struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
-  char content[MAXLINE];
-  ssize_t len = 0;
+    struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
+    char content[MAXLINE];
+    ssize_t len = 0;
 
-  data->ishtml = 0;
+    data->ishtml = 0;
 
-  int bytesRead = 0;
+    int bytesRead = 0;
     
-  while (rio_readlineb(&rios, content, MAXLINE)) {
-    rio_writen(fd, content, strlen(content)); //send it to client
-    if(startsWith("Content-Type: text/html",content)){
-      data->ishtml = 1;
-    }
-    if(startsWith("Content-Length:",content)){
-      char *tmp = strchr(content,' ');
-      data->len = atoi(tmp);
-      bytesRead += data->len; //bytes for text
-    }
-    if(strcmp(content,"\r\n")==0)
-      break;
-  }
-
-  if(data->ishtml){
-    while (rio_readlineb(&rios, content, MAXLINE))
+    while (rio_readlineb(&rios, content, MAXLINE)) {
       rio_writen(fd, content, strlen(content)); //send it to client
-  }
-  else{
-    while (rio_readnb(&rios, content, MAXLINE) && data->len > 0) {
-      ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
-      len -= tmp;
-      bytesRead += tmp; //bytes for binary data
+      if(startsWith("Content-Type: text/html",content)){
+        data->ishtml = 1;
+      }
+      if(startsWith("Content-Length:",content)){
+        char *tmp = strchr(content,' ');
+        data->len = atoi(tmp);
+        bytesRead += data->len; //bytes for text
+      }
+      if(strcmp(content,"\r\n")==0)
+        break;
     }
-  }
 
-  return bytesRead;
+    if(data->ishtml){
+      while (rio_readlineb(&rios, content, MAXLINE))
+        rio_writen(fd, content, strlen(content)); //send it to client
+    }
+    else{
+      while (rio_readnb(&rios, content, MAXLINE) && data->len > 0) {
+        ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
+        len -= tmp;
+        bytesRead += tmp; //bytes for binary data
+      }
+    }
+    return bytesRead;
 }
 
-void fetch(int fd, char* ipaddr){
-    FILE* logFile;
-    char* logstring = (char*)malloc(sizeof(char)*MAXLINE);
+/*
+ * getIpAddr - gets ip address from client
+ */
+char* getIpAddr(int fd){
+    struct sockaddr_storage addr;
+    char *clientip = (char*)malloc(sizeof(char)*INET_ADDRSTRLEN);
+    socklen_t addr_size = sizeof(addr);
+
+    if((getpeername(fd, (struct sockaddr *)&addr, &addr_size)) < 0){
+       perror("Getpeername error!\n");
+       return NULL;
+    }
+
+    if (addr.ss_family == AF_INET) {
+       struct sockaddr_in *s = (struct sockaddr_in *)&addr;
+       inet_ntop(AF_INET, &s->sin_addr, clientip, sizeof clientip);
+    } else { // AF_INET6
+        struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
+        inet_ntop(AF_INET6, &s->sin6_addr, clientip, sizeof clientip);
+    }
+
+    return clientip;
+}
+
+/*
+ * logFile - logs each client request
+ */
+void logFile(char *ipaddr, char *uri, int size) {
+    FILE *logFile;
+    char *logstring = (char *) malloc(sizeof(char) * MAXLINE);
+
+    //logging file
+    if((logFile = fopen("proxy.log","aw"))== NULL){
+        printf("Cannot open log file\n");
+    }
+
+    format_log_entry(logstring, ipaddr, uri, size);
+    fprintf(logFile, "%s", logstring);
+
+    free(ipaddr);
+    fclose(logFile);
+    free(logstring);
+}
+
+/*
+ * fetch - getting content from host and send it to client
+ */
+void *fetch(void *thread_fd){
+    int fd = *((int *)thread_fd);
+    Pthread_detach(pthread_self());
+    Free(thread_fd);
     
-    //struct stat sbuf;
     char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char hostname[MAXLINE], pathname[MAXLINE];
-    //int port;
     char* port = (char*)malloc(sizeof(char)*20);
     rio_t rioc; //for client
+
     int clientfd; //for this proxy to connect to web server
 
     /* Read request line and headers */
     rio_readinitb(&rioc, fd);
     if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
-        return;
-
-    //printf("%s", request); // buf holds HTTP request
+      return NULL;
 
     sscanf(request, "%s %s %s", method, uri, version);   //parsing request
     if (strcasecmp(method, "GET")) {                 //checks method
-        clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
-        return;
+      clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
+      return NULL;
     }
-    //read_requesthdrs(&rio);
 
     int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
     if(stat!=0){ //returns -1 if problem
-        clienterror(fd, uri, "505", "??????",".....");
-        return;
+      clienterror(fd, uri, "505", "??????",".....");
+      return NULL;
     }
-
-    //printf("%s\n", request)
 
     char newRequest[MAXBUF];
     char *v = "HTTP/1.0";
@@ -165,20 +208,14 @@ void fetch(int fd, char* ipaddr){
     rio_t rios;
     rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
     rio_readinitb(&rios, clientfd);
+    int bytesRead = send_data(rios,fd,clientfd,newRequest);
 
-    int bytes = send_data(rios,fd,clientfd,newRequest);  //need to return num of bytes read
+    logFile(getIpAddr(fd), hostname, bytesRead);
 
-    //logging file
-    if((logFile = fopen("proxy.log","aw"))== NULL){
-        printf("Cannot open log file\n");
-    }
-    format_log_entry(logstring, ipaddr, hostname, bytes);
-    fprintf(logFile, "%s", logstring);
-    fclose(logFile);
-    
-    free(logstring);      
-    free(port);
+    Free(port);
     Close(clientfd);
+    Close(fd);
+    return NULL;
 }
 
 /*
