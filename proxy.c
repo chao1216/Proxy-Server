@@ -1,13 +1,9 @@
 /*
  * proxy.c - CS:APP Web proxy
  *
- * TEAM MEMBERS:  put your name(s) and e-mail addresses here
- *     Howard the Duck, howie@duck.sewanee.edu
- *     James Q. Pleebus, pleebles@q.sewanee.edu
- *
- * IMPORTANT: Give a high level description of your code here. You
- * must also provide a header comment at the beginning of each
- * function that describes what that function does.
+ * TEAM MEMBERS:
+ *     Chao Lin, linc0@sewanee.edu
+ *     Paul Ricks, rickspj0@sewanee.edu
  */
 
 #include "csapp.h"
@@ -121,20 +117,20 @@ int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
  */
 char* getIpAddr(int fd){
     struct sockaddr_storage addr;
-    char *clientip = (char*)malloc(sizeof(char)*INET_ADDRSTRLEN);
+    char *clientip = (char*)malloc(sizeof(char)*INET6_ADDRSTRLEN);
     socklen_t addr_size = sizeof(addr);
 
     if((getpeername(fd, (struct sockaddr *)&addr, &addr_size)) < 0){
-       perror("Getpeername error!\n");
+       perror("Getpeername Error!\n");
        return NULL;
     }
 
     if (addr.ss_family == AF_INET) {
        struct sockaddr_in *s = (struct sockaddr_in *)&addr;
-       inet_ntop(AF_INET, &s->sin_addr, clientip, sizeof clientip);
+       inet_ntop(AF_INET, &s->sin_addr, clientip, INET_ADDRSTRLEN);
     } else { // AF_INET6
-        struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
-        inet_ntop(AF_INET6, &s->sin6_addr, clientip, sizeof clientip);
+       struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
+       inet_ntop(AF_INET6, &s->sin6_addr, clientip, INET6_ADDRSTRLEN);
     }
 
     return clientip;
