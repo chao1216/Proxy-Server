@@ -1,9 +1,11 @@
 /*
  * proxy.c - CS:APP Web proxy
  *
- * TEAM MEMBERS:
+ *     Paul Ricks, rickspj0@seawnee.edu
  *     Chao Lin, linc0@sewanee.edu
- *     Paul Ricks, rickspj0@sewanee.edu
+ *
+ * This code runs a simple proxy server for TCP/IP connections.
+ * It also logs all requests from the web-server/client.
  */
 
 #include "csapp.h"
@@ -62,7 +64,8 @@ int main(int argc, char **argv)
 }
 
 /*
- * startsWith - checks beginning of a string
+ * startsWith check if the second string has the first string as a predicate.
+ * Takes two valid string constants and returns the bool value (int).
  */
 int startsWith(const char *pre, const char *str)
 {
@@ -72,7 +75,13 @@ int startsWith(const char *pre, const char *str)
 }
 
 /*
- * send_header sends the header info to the client and returns the package size
+ * send_data first sends the header data, and uses that data to extract
+ * the necessary information, and then sends html data line by line
+ * and all other data in MAXLINE increments.
+ *
+ * Needs the rio buffer, the two file descriptors, and the request.
+ *
+ * Returns the number of bytes read.
  */
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
