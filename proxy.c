@@ -16,8 +16,8 @@
 #define MAX_OBJECT_SIZE 102400
 
 struct reqData {
-  ssize_t len;
-  int ishtml;
+    ssize_t len;
+    int ishtml;
 };
 
 /* You won't lose style points for including this long line in your code */
@@ -27,21 +27,23 @@ static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) 
  * Function prototypes
  */
 int parse_uri(char *uri, char *target_addr, char *path, char  *port);
-void format_log_entry(char *logstring, char* ipstr, char *uri, int size);
+void format_log_entry(char *logstring, char *ipstr, char *uri, int size);
+void logFile(char *ipaddr, char *uri, int size);
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest);
 int startsWith(const char *pre, const char *str);
 void *fetch(void *thread_fd);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
+char* getIpAddr(int fd);
 
 /*
  * main - Main routine for the proxy program
  */
 int main(int argc, char **argv)
 {
-  int listenfd, *connfd;
+    int listenfd, *connfd;
     socklen_t clientlen;
-    struct sockaddr_storage clientaddr;  /* Enough space for any address */  //line:netp:echoserveri:sockaddrstorage
-    char client_hostname[MAXLINE], client_port[MAXLINE];
+    struct sockaddr_storage clientaddr;
+    //char hostname[MAXLINE], port[MAXLINE];
 
     if (argc != 2) {
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -50,11 +52,14 @@ int main(int argc, char **argv)
 
     listenfd = Open_listenfd(argv[1]);
     while (1) {
-        clientlen = sizeof(struct sockaddr_storage);
-        connfd = Malloc(sizeof(int));
-        *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        pthread_t tid;
-        Pthread_create(&tid,NULL,fetch,connfd);
+      //SIGPIPE - client disconnects prematurely
+      signal(SIGPIPE, SIG_IGN); //catching SIGPIPE and ignoring it
+
+      clientlen = sizeof(struct sockaddr_storage);
+      connfd = Malloc(sizeof(int));
+      *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+      pthread_t tid;
+      Pthread_create(&tid,NULL,fetch,connfd);
     }
 }
 
@@ -64,9 +69,9 @@ int main(int argc, char **argv)
  */
 int startsWith(const char *pre, const char *str)
 {
-  size_t lenpre = strlen(pre),
+    size_t lenpre = strlen(pre),
     lenstr = strlen(str);
-  return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
+    return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
 }
 
 /*
@@ -80,101 +85,142 @@ int startsWith(const char *pre, const char *str)
  */
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
-  struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
-  char content[MAXLINE];
-  ssize_t len = 0;
+    struct reqData *data = (struct reqData *)malloc(sizeof(struct reqData));
+    char content[MAXLINE];
+    ssize_t len = 0;
 
-  data->ishtml = 0;
+    data->ishtml = 0;
 
-  int bytesRead = 0;
-
-  while (rio_readlineb(&rios, content, MAXLINE)) {
-    rio_writen(fd, content, strlen(content)); //send it to client
-    if(startsWith("Content-Type: text/html",content)){
-      data->ishtml = 1;
-    }
-    if(startsWith("Content-Length:",content)){
-      char *tmp = strchr(content,' ');
-      data->len = atoi(tmp);
-      bytesRead += data->len; //bytes for text
-    }
-    if(strcmp(content,"\r\n")==0)
-      break;
-  }
-
-  if(data->ishtml){
-    while (rio_readlineb(&rios, content, MAXLINE))
+    int bytesRead = 0;
+    
+    while (rio_readlineb(&rios, content, MAXLINE)) {
       rio_writen(fd, content, strlen(content)); //send it to client
-  }
-  else{
-    while (rio_readnb(&rios, content, MAXLINE) && data->len > 0) {
-      ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
-      len -= tmp;
-      bytesRead += tmp; //bytes for binary data
+      if(startsWith("Content-Type: text/html",content)){
+        data->ishtml = 1;
+      }
+      if(startsWith("Content-Length:",content)){
+        char *tmp = strchr(content,' ');
+        data->len = atoi(tmp);
+        bytesRead += data->len; //bytes for text
+      }
+      if(strcmp(content,"\r\n")==0)
+        break;
     }
-  }
 
-  return bytesRead;
+    if(data->ishtml){
+      while (rio_readlineb(&rios, content, MAXLINE))
+        rio_writen(fd, content, strlen(content)); //send it to client
+    }
+    else{
+      while (rio_readnb(&rios, content, MAXLINE) && data->len > 0) {
+        ssize_t tmp = rio_writen(fd, content, MAXLINE); //send it to client
+        len -= tmp;
+        bytesRead += tmp; //bytes for binary data
+      }
+    }
+    return bytesRead;
 }
 
+/*
+ * getIpAddr - gets ip address from client
+ */
+char* getIpAddr(int fd){
+    struct sockaddr_storage addr;
+    char *clientip = (char*)malloc(sizeof(char)*INET6_ADDRSTRLEN);
+    socklen_t addr_size = sizeof(addr);
+
+    if((getpeername(fd, (struct sockaddr *)&addr, &addr_size)) < 0){
+       perror("Getpeername Error!\n");
+       return NULL;
+    }
+
+    if (addr.ss_family == AF_INET) {
+       struct sockaddr_in *s = (struct sockaddr_in *)&addr;
+       inet_ntop(AF_INET, &s->sin_addr, clientip, INET_ADDRSTRLEN);
+    } else { // AF_INET6
+       struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
+       inet_ntop(AF_INET6, &s->sin6_addr, clientip, INET6_ADDRSTRLEN);
+    }
+
+    return clientip;
+}
+
+/*
+ * logFile - logs each client request
+ */
+void logFile(char *ipaddr, char *uri, int size) {
+    FILE *logFile;
+    char *logstring = (char *) malloc(sizeof(char) * MAXLINE);
+
+    //logging file
+    if((logFile = fopen("proxy.log","aw"))== NULL){
+        printf("Cannot open log file\n");
+    }
+
+    format_log_entry(logstring, ipaddr, uri, size);
+    fprintf(logFile, "%s", logstring);
+
+    free(ipaddr);
+    fclose(logFile);
+    free(logstring);
+}
+
+/*
+ * fetch - getting content from host and send it to client
+ */
 void *fetch(void *thread_fd){
-  int fd = *((int *)thread_fd);
-  Pthread_detach(pthread_self());
-  Free(thread_fd);
-  struct stat sbuf;
-  char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-  char hostname[MAXLINE], pathname[MAXLINE];
-  //int port;
-  char* port = (char*)malloc(sizeof(char)*20);
-  rio_t rioc; //for client
-  int clientfd; //for this proxy to connect to web server
+    int fd = *((int *)thread_fd);
+    Pthread_detach(pthread_self());
+    Free(thread_fd);
+    
+    char request[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    char hostname[MAXLINE], pathname[MAXLINE];
+    char* port = (char*)malloc(sizeof(char)*20);
+    rio_t rioc; //for client
 
-  /* Read request line and headers */
-  rio_readinitb(&rioc, fd);
-  if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
-    return NULL;
+    int clientfd; //for this proxy to connect to web server
 
-  //printf("%s", request); // buf holds HTTP request
-  sscanf(request, "%s %s %s", method, uri, version);   //parsing request
-  if (strcasecmp(method, "GET")) {                 //checks method
-    clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
-    return NULL;
-  }
-  //read_requesthdrs(&rio);
+    /* Read request line and headers */
+    rio_readinitb(&rioc, fd);
+    if (!rio_readlineb(&rioc, request, MAXLINE)) //read request
+      return NULL;
 
-  int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
-  if(stat!=0){ //returns -1 if problem
-    clienterror(fd, uri, "505", "??????",".....");
-    return NULL;
-  }
+    sscanf(request, "%s %s %s", method, uri, version);   //parsing request
+    if (strcasecmp(method, "GET")) {                 //checks method
+      clienterror(fd, method, "501", "Not Implemented","Proxy does not support this request");
+      return NULL;
+    }
 
-  //printf("%s\n", request)
+    int stat = parse_uri(uri,hostname,pathname,port); //get hostname and pathname from uri
+    if(stat!=0){ //returns -1 if problem
+      clienterror(fd, uri, "505", "??????",".....");
+      return NULL;
+    }
 
-  char newRequest[MAXBUF];
-  char *v = "HTTP/1.0";
+    char newRequest[MAXBUF];
+    char *v = "HTTP/1.0";
 
     sprintf(newRequest,"%s /%s %s\r\n"
                        "Host: %s\r\n"
                        "User-Agent: %s\r\n"
                        "Connection: close\r\n"
-                       "Proxy-Connection:close\r\n\r\n",
+                       "Proxy-Connection: close\r\n\r\n",
                        method,pathname,v,hostname,user_agent_hdr);
 
-  //now need to make connection with web server
-  clientfd = open_clientfd(hostname, port);
+    //now need to make connection with web server
+    clientfd = open_clientfd(hostname, port);
 
-  //printf("%d\n", clientfd);
+    rio_t rios;
+    rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
+    rio_readinitb(&rios, clientfd);
+    int bytesRead = send_data(rios,fd,clientfd,newRequest);
 
-  rio_t rios;
-  rio_writen(clientfd, newRequest, strlen(newRequest)); //send request
-  rio_readinitb(&rios, clientfd);
+    logFile(getIpAddr(fd), hostname, bytesRead);
 
-  send_data(rios,fd,clientfd,newRequest);
-
-  Free(port);
-  Close(clientfd);
-  Close(fd);
-  return NULL;
+    Free(port);
+    Close(clientfd);
+    Close(fd);
+    return NULL;
 }
 
 /*
@@ -220,7 +266,6 @@ int parse_uri(char *uri, char *hostname, char *pathname, char *port)
         strcpy(pathname, pathbegin);
     }
 
-
     return 0;
 }
 
@@ -235,10 +280,6 @@ void format_log_entry(char *logstring, char* ipaddr, char *uri, int size)
 {
     time_t now;
     char time_str[MAXLINE];
-    //unsigned long host;
-    //unsigned char a, b, c, d;
-    //struct in_addr inaddr;
-    //char addr[MAXBUF];
 
     /* Get a formatted time string */
     now = time(NULL);
