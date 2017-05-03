@@ -1,13 +1,11 @@
 /*
  * proxy.c - CS:APP Web proxy
  *
- * TEAM MEMBERS:  put your name(s) and e-mail addresses here
- *     Howard the Duck, howie@duck.sewanee.edu
- *     James Q. Pleebus, pleebles@q.sewanee.edu
+ *     Paul Ricks, rickspj0@seawnee.edu
+ *     Chao Lin, linc0@sewanee.edu
  *
- * IMPORTANT: Give a high level description of your code here. You
- * must also provide a header comment at the beginning of each
- * function that describes what that function does.
+ * This code runs a simple proxy server for TCP/IP connections.
+ * It also logs all requests from the web-server/client.
  */
 
 #include "csapp.h"
@@ -60,7 +58,10 @@ int main(int argc, char **argv)
     }
 }
 
-
+/*
+ * startsWith check if the second string has the first string as a predicate.
+ * Takes two valid string constants and returns the bool value (int).
+ */
 int startsWith(const char *pre, const char *str)
 {
   size_t lenpre = strlen(pre),
@@ -69,7 +70,13 @@ int startsWith(const char *pre, const char *str)
 }
 
 /*
- * send_header sends the header info to the client and returns the package size
+ * send_data first sends the header data, and uses that data to extract
+ * the necessary information, and then sends html data line by line
+ * and all other data in MAXLINE increments.
+ *
+ * Needs the rio buffer, the two file descriptors, and the request.
+ *
+ * Returns the number of bytes read.
  */
 int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
 {
@@ -80,7 +87,7 @@ int send_data(rio_t rios, int fd, int clientfd, char *newRequest)
   data->ishtml = 0;
 
   int bytesRead = 0;
-    
+
   while (rio_readlineb(&rios, content, MAXLINE)) {
     rio_writen(fd, content, strlen(content)); //send it to client
     if(startsWith("Content-Type: text/html",content)){
