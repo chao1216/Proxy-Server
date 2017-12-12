@@ -1,8 +1,6 @@
 /*
  * proxy.c - CS:APP Web proxy
  *
- *     Paul Ricks, rickspj0@seawnee.edu
- *     Chao Lin, linc0@sewanee.edu
  *
  * This code runs a simple proxy server for TCP/IP connections.
  * It also logs all requests from the web-server/client.
@@ -20,7 +18,6 @@ struct reqData {
     int ishtml;
 };
 
-/* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3";
 
 /*
